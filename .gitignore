@@ -1,0 +1,11 @@
+build
+out
+obj
+temp
+tmp
+.tags*
+.etags
+*.sublime-project
+Gemfile.lock
+.rake_t_cache
+.DS_Store
