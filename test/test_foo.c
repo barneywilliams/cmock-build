@@ -9,7 +9,7 @@ void tearDown(void)
 {
 }
 
-void test_foo_should_do_something()
+void test_foo_init_should_initialize_multiplier()
 {
-    TEST_IGNORE_MESSAGE("TODO: Implement foo!");
+    foo_init();
 }

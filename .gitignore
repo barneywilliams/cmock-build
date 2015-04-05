@@ -5,7 +5,7 @@ temp
 tmp
 .tags*
 .etags
-*.sublime-project
+*.sublime-*
 Gemfile.lock
 .rake_t_cache
 .DS_Store
