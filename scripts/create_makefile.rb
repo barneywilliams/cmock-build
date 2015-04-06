@@ -13,7 +13,11 @@ test_bin_dir = ENV.fetch('TEST_BIN_DIR', "#{build_dir}/test/bin")
 obj_dir = File.join(build_dir, 'obj')
 unity_obj = File.join(obj_dir, 'unity.o')
 runners_dir = File.join(build_dir, 'test/runners')
+mock_prefix = ENV.fetch('MOCK_PREFIX', 'mock_')
 mock_out = File.join(build_dir, 'test/mocks')
+MOCK_MATCHER = /#{mock_prefix}[A-Za-z_][A-Za-z0-9_\-\.]+/
+
+all_headers_to_mock = []
 
 File.open("build/MakefileTestSupport", "w") do |mkfile|
 
@@ -23,6 +27,8 @@ File.open("build/MakefileTestSupport", "w") do |mkfile|
 
   test_sources = Dir["#{test_dir}/**/test_*.c"]
   generator = UnityTestRunnerGenerator.new
+  all_headers = Dir["#{src_dir}/**/*.h"]
+
   test_sources.each do |test|
     module_name = File.basename(test, '.c')
     src_module_name = module_name.sub(/^test_/, '')
@@ -49,7 +55,24 @@ File.open("build/MakefileTestSupport", "w") do |mkfile|
       src: test,
       includes: generator.find_includes(File.readlines(test).join(''))
     }
-    puts cfg
+    system_mocks = cfg[:includes][:system].select{|name| name =~ MOCK_MATCHER}
+    raise "Mocking of system headers is not yet supported!" if !system_mocks.empty?
+    local_mocks = cfg[:includes][:local].select{|name| name =~ MOCK_MATCHER}
+    module_names_to_mock = local_mocks.map{|name| "#{name.sub(/#{mock_prefix}/,'')}.h"}
+    headers_to_mock = []
+    module_names_to_mock.each do |name|
+      header_to_mock = nil
+      all_headers.each do |header|
+        if (header =~ /[\/\\]?#{name}$/)
+          header_to_mock = header
+          break
+        end
+      end
+      raise "Module header '#{name}' not found to mock!" unless header_to_mock
+      headers_to_mock << header_to_mock 
+    end
+    all_headers_to_mock += headers_to_mock
+
     mkfile.puts "#{test_obj}: #{test} #{module_obj}"
     mkfile.puts "\t${CC} -o $@ -c $< -I #{src_dir} -I #{unity_src}"
     mkfile.puts ""
@@ -59,6 +82,7 @@ File.open("build/MakefileTestSupport", "w") do |mkfile|
     mkfile.puts "#{test_bin}: #{test_objs}"
     mkfile.puts "\t${CC} -o $@ #{test_objs}"
     mkfile.puts ""
-
   end
 end
+
+puts "Headers to mock: #{all_headers_to_mock.join(', ')}"
