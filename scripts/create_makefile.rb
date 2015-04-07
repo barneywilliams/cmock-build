@@ -7,50 +7,80 @@ require "#{unity_abs_root}/auto/generate_test_runner"
 src_dir =  ENV.fetch('SRC_DIR',  './src')
 test_dir = ENV.fetch('TEST_DIR', './test')
 unity_dir = ENV.fetch('UNITY_DIR', './vendor/cmock/vendor/unity')
-unity_src = "#{unity_dir}/src"
+unity_src = File.join(unity_dir, 'src')
+cmock_src = './vendor/cmock/src'
 build_dir = ENV.fetch('BUILD_DIR', './build')
-test_bin_dir = ENV.fetch('TEST_BIN_DIR', "#{build_dir}/test/bin")
-obj_dir = File.join(build_dir, 'obj')
+test_build_dir = ENV.fetch('TEST_BUILD_DIR', File.join(build_dir, 'test'))
+obj_dir = File.join(test_build_dir, 'obj')
 unity_obj = File.join(obj_dir, 'unity.o')
-runners_dir = File.join(build_dir, 'test/runners')
-mock_prefix = ENV.fetch('MOCK_PREFIX', 'mock_')
-mock_out = File.join(build_dir, 'test/mocks')
+cmock_obj = File.join(obj_dir, 'cmock.o')
+runners_dir = File.join(test_build_dir, 'runners')
+mocks_dir = File.join(test_build_dir, 'mocks')
+test_bin_dir = File.join(test_build_dir, 'bin')
+mock_prefix = ENV.fetch('TEST_MOCK_PREFIX', 'mock_')
+test_makefile = ENV.fetch('TEST_MAKEFILE', File.join(test_build_dir, 'MakefileTestSupport'))
 MOCK_MATCHER = /#{mock_prefix}[A-Za-z_][A-Za-z0-9_\-\.]+/
+
+[test_build_dir, obj_dir, runners_dir, mocks_dir, test_bin_dir].each do |dir|
+  FileUtils.mkdir_p dir
+end
 
 all_headers_to_mock = []
 
-File.open("build/MakefileTestSupport", "w") do |mkfile|
+File.open(test_makefile, "w") do |mkfile|
 
+  # Define make variables
+  mkfile.puts "CC ?= gcc"
+  mkfile.puts "BUILD_DIR ?= ./build"
+  mkfile.puts "SRC_DIR ?= ./src"
+  mkfile.puts "TEST_DIR ?= ./test"
+  mkfile.puts "UNITY_DIR ?= ./vendor/cmock/vendor/unity"
+  mkfile.puts "TEST_BUILD_DIR ?= ${BUILD_DIR}/test"
+  mkfile.puts "TEST_MAKEFILE = ${TEST_BUILD_DIR}/MakefileTestSupport"
+  mkfile.puts "OBJ ?= ${BUILD_DIR}/obj"
+  mkfile.puts "OBJ_DIR = ${OBJ}"
+  mkfile.puts ""
+
+  # Build Unity
   mkfile.puts "#{unity_obj}: #{unity_src}/unity.c"
   mkfile.puts "\t${CC} -o $@ -c $< -I #{unity_src}"
   mkfile.puts ""
 
+  # Build CMock
+  mkfile.puts "#{cmock_obj}: #{cmock_src}/cmock.c"
+  mkfile.puts "\t${CC} -o $@ -c $< -I #{unity_src} -I #{cmock_src}"
+  mkfile.puts ""
+
   test_sources = Dir["#{test_dir}/**/test_*.c"]
+  test_targets = []
   generator = UnityTestRunnerGenerator.new
   all_headers = Dir["#{src_dir}/**/*.h"]
 
   test_sources.each do |test|
     module_name = File.basename(test, '.c')
     src_module_name = module_name.sub(/^test_/, '')
-
-    module_src = File.join(src_dir, "#{src_module_name}.c")
-    module_obj = File.join(obj_dir, "#{src_module_name}.o")
-    mkfile.puts "#{module_obj}: #{module_src}"
-    mkfile.puts "\t${CC} -o $@ -c $< -I #{src_dir}"
-    mkfile.puts ""
-
     runner_source = File.join(runners_dir, "runner_#{module_name}.c")
     runner_obj = File.join(obj_dir, "runner_#{module_name}.o")
     test_obj = File.join(obj_dir, "#{module_name}.o")
 
+    # Build main project modules, with TEST defined
+    module_src = File.join(src_dir, "#{src_module_name}.c")
+    module_obj = File.join(obj_dir, "#{src_module_name}.o")
+    mkfile.puts "#{module_obj}: #{module_src}"
+    mkfile.puts "\t${CC} -o $@ -c $< -DTEST -I #{src_dir}"
+    mkfile.puts ""
+
+    # Create runners
     mkfile.puts "#{runner_source}: #{test}"
     mkfile.puts "\truby scripts/create_runner.rb #{test} #{runner_source}"
     mkfile.puts ""
 
+    # Build runners
     mkfile.puts "#{runner_obj}: #{runner_source}"
-    mkfile.puts "\t${CC} -o $@ -c $< -I #{src_dir} -I #{unity_src}"
+    mkfile.puts "\t${CC} -o $@ -c $< -I #{src_dir} -I #{mocks_dir} -I #{unity_src} -I #{cmock_src}"
     mkfile.puts ""
 
+    # Collect mocks to generate
     cfg = {
       src: test,
       includes: generator.find_includes(File.readlines(test).join(''))
@@ -72,17 +102,45 @@ File.open("build/MakefileTestSupport", "w") do |mkfile|
       headers_to_mock << header_to_mock 
     end
     all_headers_to_mock += headers_to_mock
+    mock_objs = headers_to_mock.map do |hdr|
+      mock_name = mock_prefix + File.basename(hdr, '.h')
+      File.join(mocks_dir, mock_name + '.o')
+    end
+    all_headers_to_mock.uniq!
 
-    mkfile.puts "#{test_obj}: #{test} #{module_obj}"
-    mkfile.puts "\t${CC} -o $@ -c $< -I #{src_dir} -I #{unity_src}"
+    # Build test suites
+    mkfile.puts "#{test_obj}: #{test} #{module_obj} #{mock_objs.join(' ')}"
+    mkfile.puts "\t${CC} -o $@ -c $< -I #{src_dir} -I #{unity_src} -I #{cmock_src} -I #{mocks_dir}"
     mkfile.puts ""
 
+    # Build test suite runners
     test_bin = File.join(test_bin_dir, module_name)
-    test_objs = "#{test_obj} #{runner_obj} #{module_obj} #{unity_obj}"
+    test_objs = "#{test_obj} #{runner_obj} #{module_obj} #{mock_objs.join(' ')} #{unity_obj} #{cmock_obj}"
     mkfile.puts "#{test_bin}: #{test_objs}"
     mkfile.puts "\t${CC} -o $@ #{test_objs}"
     mkfile.puts ""
-  end
-end
 
-puts "Headers to mock: #{all_headers_to_mock.join(', ')}"
+    test_targets << test_bin
+  end
+
+  # Generate and build mocks
+  all_headers_to_mock.each do |hdr|
+    mock_name = mock_prefix + File.basename(hdr, '.h')
+    mock_header = File.join(mocks_dir, mock_name + '.h')
+    mock_src = File.join(mocks_dir, mock_name + '.c')
+    mock_obj = File.join(mocks_dir, mock_name + '.o')
+
+    mkfile.puts "#{mock_src}: #{hdr}"
+    mkfile.puts "\truby scripts/create_mock.rb #{hdr}"
+    mkfile.puts ""
+
+    mkfile.puts "#{mock_obj}: #{mock_src} #{mock_header}"
+    mkfile.puts "\t${CC} -o $@ -c $< -I #{mocks_dir} -I #{src_dir} -I #{unity_src} -I #{cmock_src}"
+    mkfile.puts ""
+  end
+
+  mkfile.puts "test: #{test_targets.join(' ')}"
+  test_targets.each{|t| mkfile.puts "\t#{t}"}
+  mkfile.puts ""
+
+end
