@@ -59,9 +59,11 @@ File.open(test_makefile, "w") do |mkfile|
   test_sources.each do |test|
     module_name = File.basename(test, '.c')
     src_module_name = module_name.sub(/^test_/, '')
+    test_obj = File.join(obj_dir, "#{module_name}.o")
     runner_source = File.join(runners_dir, "runner_#{module_name}.c")
     runner_obj = File.join(obj_dir, "runner_#{module_name}.o")
-    test_obj = File.join(obj_dir, "#{module_name}.o")
+    test_bin = File.join(test_bin_dir, module_name)
+    test_results = File.join(test_bin_dir, module_name + '.result')
 
     # Build main project modules, with TEST defined
     module_src = File.join(src_dir, "#{src_module_name}.c")
@@ -75,7 +77,7 @@ File.open(test_makefile, "w") do |mkfile|
     mkfile.puts "\truby scripts/create_runner.rb #{test} #{runner_source}"
     mkfile.puts ""
 
-    # Build runners
+    # Build runner
     mkfile.puts "#{runner_obj}: #{runner_source}"
     mkfile.puts "\t${CC} -o $@ -c $< -I #{src_dir} -I #{mocks_dir} -I #{unity_src} -I #{cmock_src}"
     mkfile.puts ""
@@ -108,17 +110,20 @@ File.open(test_makefile, "w") do |mkfile|
     end
     all_headers_to_mock.uniq!
 
-    # Build test suites
+    # Build test suite
     mkfile.puts "#{test_obj}: #{test} #{module_obj} #{mock_objs.join(' ')}"
     mkfile.puts "\t${CC} -o $@ -c $< -I #{src_dir} -I #{unity_src} -I #{cmock_src} -I #{mocks_dir}"
     mkfile.puts ""
 
-    # Build test suite runners
-    test_bin = File.join(test_bin_dir, module_name)
+    # Build test suite executable
     test_objs = "#{test_obj} #{runner_obj} #{module_obj} #{mock_objs.join(' ')} #{unity_obj} #{cmock_obj}"
     mkfile.puts "#{test_bin}: #{test_objs}"
     mkfile.puts "\t${CC} -o $@ #{test_objs}"
     mkfile.puts ""
+
+    # Run test suite and generate report
+    mkfile.puts "#{test_results}: #{test_bin}"
+    mkfile.puts "\t#{test_bin} &> #{test_results}"
 
     test_targets << test_bin
   end
@@ -139,8 +144,15 @@ File.open(test_makefile, "w") do |mkfile|
     mkfile.puts ""
   end
 
-  mkfile.puts "test: #{test_targets.join(' ')}"
-  test_targets.each{|t| mkfile.puts "\t#{t}"}
+  # Create test summary task
+  mkfile.puts "test_summary:"
+  mkfile.puts "\t@ruby scripts/test_summary.rb"
+  mkfile.puts ""
+  mkfile.puts ".PHONY: test_summary"
+  mkfile.puts ""
+
+  # Create target to run all tests
+  mkfile.puts "test: #{test_targets.map{|t| t + '.result'}.join(' ')} test_summary"
   mkfile.puts ""
 
 end
