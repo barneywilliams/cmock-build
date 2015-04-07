@@ -16,7 +16,7 @@ unity_obj = File.join(obj_dir, 'unity.o')
 cmock_obj = File.join(obj_dir, 'cmock.o')
 runners_dir = File.join(test_build_dir, 'runners')
 mocks_dir = File.join(test_build_dir, 'mocks')
-test_bin_dir = File.join(test_build_dir, 'bin')
+test_bin_dir = test_build_dir
 mock_prefix = ENV.fetch('TEST_MOCK_PREFIX', 'mock_')
 test_makefile = ENV.fetch('TEST_MAKEFILE', File.join(test_build_dir, 'MakefileTestSupport'))
 MOCK_MATCHER = /#{mock_prefix}[A-Za-z_][A-Za-z0-9_\-\.]+/
@@ -124,6 +124,7 @@ File.open(test_makefile, "w") do |mkfile|
     # Run test suite and generate report
     mkfile.puts "#{test_results}: #{test_bin}"
     mkfile.puts "\t#{test_bin} &> #{test_results}"
+    mkfile.puts ""
 
     test_targets << test_bin
   end
